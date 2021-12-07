@@ -115,3 +115,5 @@ If you have run out of energy or time for your project, put a note at the top of
 
 - `.terraformrc` - игнорируем  файлы `.terraformrc` в каталоге `terraform` и во всех вложенных каталогах;
 - `terraform.rc` - игнорируем  файлы `terraform.rc` в каталоге `terraform` и во всех вложенных каталогах;
+
+new line
