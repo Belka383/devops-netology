@@ -39,7 +39,7 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 ---
 6) Найдите все коммиты в которых была изменена функция globalPluginDirs.
 ####
-для этого сначала найдём упоминания этой функции в файлах: `git grep -p globalPluginDirs('` - получим:
+для этого сначала найдём упоминания этой функции в файлах: `git grep -p 'globalPluginDirs('` - получим:
 ####
 ```shell
  commands.go=func initCommands(
