@@ -1,5 +1,244 @@
 # Devops Netology
 
+## Комментарии по ДЗ "3.2. Работа в терминале, лекция 2"
+1) Какого типа команда `cd`? Попробуйте объяснить, почему она именно такого типа; опишите ход своих мыслей, если считаете что она могла бы быть другого типа.
+####
+Можно воспользоваться командой `type` для определения типа команды:
+```shell
+type cd
+```
+получим: `cd is a shell builtin`. Т.о. выяснили, что команда является встроенной.
+Если бы `cd` была внешней программой, то после смены директории необходимо было бы вызвать `bash` из нового каталога, но тогда мы получим новый `shell`.
+При таком использовании `cd` порождались бы новые сессии, которые создавались бы при каждом вызове `cd`.
+
+2) Какая альтернатива без `pipe` команде `grep <some_string> <some_file> | wc -l`? `man grep` поможет в ответе на этот вопрос.
+####
+```shell
+vagrant@vagrant:/tmp$ cat file.txt
+hello world!
+current year - 2022
+vagrant@vagrant:/tmp$ grep 2022 file.txt
+current year - 2022
+vagrant@vagrant:/tmp$ grep 2022 file.txt | wc -l
+1
+vagrant@vagrant:/tmp$ grep 2022 file.txt -c
+1
+```
+
+3) Какой процесс с PID 1 является родителем для всех процессов в вашей виртуальной машине `Ubuntu 20.04`?
+####
+systemd 
+```shell
+vagrant@vagrant:/tmp$ pstree -p
+systemd(1)─┬─VBoxService(884)─┬─{VBoxService}(886)
+           │                  ├─{VBoxService}(887)
+           │                  ├─{VBoxService}(888)
+```
+
+4) Как будет выглядеть команда, которая перенаправит вывод `stderr ls` на другую сессию терминала?
+#### 
+Для этого откроем второй терминал и сделаем `vagrant ssh`. По итогу получаем две сессии:
+```shell
+vagrant@vagrant:/tmp$ who
+vagrant  pts/0        2022-01-29 15:40 (10.0.2.2)
+vagrant  pts/1        2022-01-29 17:26 (10.0.2.2)
+```
+Перенаправляем вывод stderr ls:
+```shell
+vagrant@vagrant:/$ ls -l \temp 2>/dev/pts/1
+```
+В терминале другой сессии видим:
+```shell
+vagrant@vagrant:~$ ls: cannot access 'temp': No such file or directory
+```
+
+5) Получится ли одновременно передать команде файл на `stdin` и вывести ее stdout в другой файл? Приведите работающий пример.
+```shell
+vagrant@vagrant:/tmp$ cat file.txt
+hello world!
+current year - 2022
+vagrant@vagrant:/tmp$ cat new_file.txt
+cat: new_file.txt: No such file or directory
+vagrant@vagrant:/tmp$ cat < file.txt > new_file.txt
+vagrant@vagrant:/tmp$ cat new_file.txt
+hello world!
+current year - 2022
+vagrant@vagrant:/tmp$
+```
+
+6) Получится ли находясь в графическом режиме, вывести данные из `PTY` в какой-либо из эмуляторов `TTY`? Сможете ли вы наблюдать выводимые данные?
+####
+Получится:
+```shell
+vagrant@vagrant:/$ tty
+/dev/pts/0
+vagrant@vagrant:/$ sudo echo Hi! Echo from pts0 to tty1 >/dev/tty1
+```
+В эмуляторе TTY увидим:
+```shell
+vagrant@vagrant:~$ tty
+/dev/tty1
+vagrant@vagrant:~$ Hi! Echo from pts0 to tty1
+```
+
+7) Выполните команду `bash 5>&1`. К чему она приведет? Что будет, если вы выполните `echo netology > /proc/$$/fd/5`? Почему так происходит?
+```shell
+vagrant@vagrant:/$ bash 5>&1
+vagrant@vagrant:/$ echo netology > /proc/$$/fd/5
+netology
+```
+После выполнения `bash 5>&1` в текущей сессии был создан дескриптор с номером 5, вывод `netology` будет перенаправлен в дескриптор 5 и в `stdout`.
+
+8) Получится ли в качестве входного потока для pipe использовать только stderr команды, не потеряв при этом отображение stdout на pty? Напоминаем: по умолчанию через pipe передается только stdout команды слева от | на stdin команды справа. Это можно сделать, поменяв стандартные потоки местами через промежуточный новый дескриптор, который вы научились создавать в предыдущем вопросе.
+```shell
+vagrant@vagrant:/$ ls -l /root 5>&2 2>&1 1>&5 |grep denied -c
+1
+```
+где:
+- `5>&2` - новый дескриптор перенаправили в `stderr`;
+- `2>&1` - `stderr` перенаправили в `stdout`;
+- `1>&5` - `stdout` перенаправили в новый дескриптор.
+
+9) Что выведет команда `cat /proc/$$/environ`? Как еще можно получить аналогичный по содержанию вывод?
+#### 
+Таким образом выводим информацию о переменных окружения. Можно вывести ещё через `env` / `printenv`. Или, например, вывести значение определённой переменной:
+```shell
+vagrant@vagrant:~$ printenv HOME
+/home/vagrant
+```
+
+10) Используя man, опишите что доступно по адресам `/proc/<PID>/cmdline`, `/proc/<PID>/exe`.
+Для этого перейдём в документацию по `proc`:
+```shell
+man proc
+```
+и найдём:
+```shell
+/proc/[pid]/cmdline
+              This  read-only  file holds the complete command line for the process, unless the process is a zombie.
+              In the latter case, there is nothing in this file: that is, a read on this file will return 0  charac‐
+              ters.   The  command-line  arguments  appear  in this file as a set of strings separated by null bytes
+              ('\0'), with a further null byte after the last string.
+строки (227 - 231)
+
+ /proc/[pid]/exe
+              Under Linux 2.2 and later, this file is a symbolic link containing the actual pathname of the executed
+              command.   This  symbolic  link can be dereferenced normally; attempting to open it will open the exe‐
+              cutable.  You can even type /proc/[pid]/exe to run another copy of the same executable that  is  being
+              run  by  process  [pid].  If the pathname has been unlinked, the symbolic link will contain the string
+              '(deleted)' appended to the original pathname.  In a multithreaded process, the contents of this  sym‐
+              bolic  link  are  not  available  if  the  main  thread  has  already terminated (typically by calling
+              pthread_exit(3)).
+
+              Permission to dereference or read (readlink(2)) this symbolic link is governed by a ptrace access mode
+              PTRACE_MODE_READ_FSCREDS check; see ptrace(2).
+
+              Under  Linux  2.0  and earlier, /proc/[pid]/exe is a pointer to the binary which was executed, and ap‐
+              pears as a symbolic link.  A readlink(2) call on this file under Linux 2.0 returns  a  string  in  the
+              format:
+
+                  [device]:inode
+
+              For  example,  [0301]:1502  would  be  inode  1502 on device major 03 (IDE, MFM, etc. drives) minor 01
+              (first partition on the first drive).
+
+              find(1) with the -inum option can be used to locate the file.
+строки (280 - 301)
+```
+Коротко:
+- `/proc/[pid]/cmdline` - полный путь до исполняемого файла процесса [pid];
+- `/proc/[pid]/exe` - содержит ссылку до файла запущенного для процесса [pid].
+
+11) Узнайте, какую наиболее старшую версию набора инструкций `SSE` поддерживает ваш процессор с помощью `/proc/cpuinfo`.
+```shell
+vagrant@vagrant:/$ cd /proc
+vagrant@vagrant:/proc$ cat cpuinfo | grep sse
+```
+Старшая версия: `sse4_2` 
+
+12) При открытии нового окна терминала и `vagrant ssh` создается новая сессия и выделяется `pty`. Это можно подтвердить командой `tty`, которая упоминалась в лекции 3.2. Однако:
+```shell
+vagrant@netology1:~$ ssh localhost 'tty'
+not a tty
+```
+Почитайте, почему так происходит, и как изменить поведение.
+####
+`not a tty` - означает, что он не работает внутри терминала.
+По умолчанию, когда мы запускаем команду на удаленном компьютере с помощью ssh, `TTY` не выделяется для удаленного сеанса.
+Но если нужно, то можно добавить `-t`, и команда будет исполняться c принудительным созданием псевдотерминала:
+```shell
+vagrant@vagrant:/proc$ ssh -t localhost 'tty'
+vagrant@localhost's password:
+/dev/pts/3
+Connection to localhost closed.
+vagrant@vagrant:/proc$
+```
+
+13) Бывает, что есть необходимость переместить запущенный процесс из одной сессии в другую. Попробуйте сделать это, воспользовавшись `reptyr`. Например, так можно перенести в `screen` процесс, который вы запустили по ошибке в обычной `SSH-сессии`.
+####
+Мне потребовалась установка `reptyr`. Установил вот так:
+```shell
+sudo apt update
+sudo apt install reptyr
+```
+Напишем небольшой скрипт на `shell` - пусть он будет выводить текущее время каждую секунду, например:
+```shell
+while true
+do
+    D=$(date  +%Y-%m-%d)
+    T=$(date +%H:%M:%S)
+    echo  "$D" "$T"
+    echo "Press [CTRL+C] to exit this loop..."
+    sleep 1
+done
+```
+Запустим его:
+```shell
+vagrant@vagrant:~$ tty
+/dev/pts/0
+vagrant@vagrant:~$ sh /tmp/script.sh
+2022-01-29 20:27:07
+Press [CTRL+C] to exit this loop...
+2022-01-29 20:27:08
+Press [CTRL+C] to exit this loop...
+2022-01-29 20:27:09
+Press [CTRL+C] to exit this loop...
+```
+Открыв другую сессию, узнаем `PID` этого процесса:
+```shell
+vagrant@vagrant:~$ tty
+/dev/pts/1
+vagrant@vagrant:~$ ps -ef | grep -i script.sh
+vagrant    10303   10240  0 20:31 pts/0    00:00:00 sh /tmp/script.sh
+vagrant    10433   10288  0 20:32 pts/1    00:00:00 grep --color=auto -i script.sh
+```
+Искомый `PID` = 10303
+####
+Сделаем манипуляцию вида:
+```shell
+vagrant@vagrant:/$ sudo bash -c "echo 0 > /proc/sys/kernel/yama/ptrace_scope"
+```
+это позволит присоединиться к процессу и избежать ошибки:
+```shell
+vagrant@vagrant:/$ reptyr 10303
+[-] Timed out waiting for child stop.
+Unable to attach to pid 10303: Operation not permitted
+The kernel denied permission while attaching. If your uid matches
+the target's, check the value of /proc/sys/kernel/yama/ptrace_scope.
+For more information, see /etc/sysctl.d/10-ptrace.conf
+```
+Далее делаем перехват этого процесса в текущую сессию в `screen`:
+```shell
+vagrant@vagrant:~$ sudo reptyr -T 10303
+```
+после можно закрывать терминал, в котором был запущен скрипт. Его работа и вывод продолжится в другом терминале.
+
+14) `sudo echo string > /root/new_file` не даст выполнить перенаправление под обычным пользователем, так как перенаправлением занимается процесс `shell`'а, который запущен без `sudo` под вашим пользователем. Для решения данной проблемы можно использовать конструкцию `echo string | sudo tee /root/new_file`. Узнайте что делает команда `tee` и почему в отличие от `sudo echo` команда с `sudo tee` будет работать.
+####
+Команда `tee` делает вывод одновременно и в файл, указанный в качестве параметра, и в `stdout`,  в данном примере команда получает вывод из `stdin`, перенаправленный через `pipe` от `stdout` команды `echo`,  и так как команда запущена от `sudo`, то она имеет права на запись в файл.
+
+
+
 ## Комментарии по ДЗ "3.1. Работа в терминале, лекция 1"
 1) Установите средство виртуализации Oracle VirtualBox: `установлен VirtualBox - v. 6.1.30 r148432 (Qt5.6.2)`; 
 2) Установите средство автоматизации Hashicorp Vagrant: `установлен Vagrant -v. 2.2.19`;
@@ -192,8 +431,8 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 
 - `override.tf` - игнорируем все файлы `override.tf` в каталоге `terraform` и во всех вложенных каталогах;
 - `override.tf.json` - игнорируем все файлы `override.tf.json` в каталоге `terraform` и во всех вложенных каталогах;
-- `*_override.tf` - игнорируем все файлы файлы с расширением `.tf` в каталоге `terraform` и во всех вложенных каталогах, наименование которых заканчивается на `_override`;
-- `*_override.tf.json` - игнорируем все файлы файлы с расширением `.json` в каталоге `terraform` и во всех вложенных каталогах, наименование которых заканчивается на `_override.tf`;
+- `*_override.tf` - игнорируем все файлы с расширением `.tf` в каталоге `terraform` и во всех вложенных каталогах, наименование которых заканчивается на `_override`;
+- `*_override.tf.json` - игнорируем все файлы с расширением `.json` в каталоге `terraform` и во всех вложенных каталогах, наименование которых заканчивается на `_override.tf`;
 
 - `.terraformrc` - игнорируем  файлы `.terraformrc` в каталоге `terraform` и во всех вложенных каталогах;
 - `terraform.rc` - игнорируем  файлы `terraform.rc` в каталоге `terraform` и во всех вложенных каталогах;
