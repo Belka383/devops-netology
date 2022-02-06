@@ -1,10 +1,181 @@
 # Devops Netology
 
+## Комментарии по ДЗ "3.3. Операционные системы, лекция 1"
+1) Какой системный вызов делает команда `cd`? В прошлом ДЗ мы выяснили, что `cd` не является самостоятельной программой, это `shell builtin`, поэтому запустить `strace` непосредственно на `cd` не получится. Тем не менее, вы можете запустить `strace` на `/bin/bash -c 'cd /tmp'`. В этом случае вы увидите полный список системных вызовов, которые делает сам `bash` при старте. Вам нужно найти тот единственный, который относится именно к `cd`. Обратите внимание, что `strace` выдаёт результат своей работы в поток stderr, а не в stdout.
+####
+`chdir` - системный вызов, который делает текущим каталог `directory` по специфицированному аргументом маршруту `path`. Попробуем найти его в результате `strace`:
+```bash
+vagrant@vagrant:~$ strace /bin/bash -c 'cd /tmp' 2>&1 | grep chdir
+chdir("/tmp")                           = 0
+```
+Системный вызов `cd /tmp`: `chdir("/tmp")`.
+
+2) Попробуйте использовать команду `file` на объекты разных типов на файловой системе. Например:
+```bash
+vagrant@netology1:~$ file /dev/tty
+/dev/tty: character special (5/0)
+vagrant@netology1:~$ file /dev/sda
+/dev/sda: block special (8/0)
+vagrant@netology1:~$ file /bin/bash
+/bin/bash: ELF 64-bit LSB shared object, x86-64
+ ```
+Используя `strace` выясните, где находится база данных `file` на основании которой она делает свои догадки.
+####
+Команда `file` использует файл-базу данных `magic` (расширение `.mgc`) для определения типа двоичного файла. По сути, `magic` содержит шаблоны, показывающие, как выглядят разные типы файлов. Попробуем найти, используя `strace`:
+```bash
+vagrant@vagrant:/$ strace /bin/bash -c 'file' 2>&1 | grep .mgc
+stat("/home/vagrant/.magic.mgc", 0x7fff9f7bebc0) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/etc/magic.mgc", O_RDONLY) = -1 ENOENT (No such file or directory)
+openat(AT_FDCWD, "/usr/share/misc/magic.mgc", O_RDONLY) = 3
+```
+Судя по всему, пытается найти в нескольких местах, но находит только `/usr/share/misc/magic.mgc`.
+
+3) Предположим, приложение пишет лог в текстовый файл. Этот файл оказался удален (deleted в lsof), однако возможности сигналом сказать приложению переоткрыть файлы или просто перезапустить приложение – нет. Так как приложение продолжает писать в удаленный файл, место на диске постепенно заканчивается. Основываясь на знаниях о перенаправлении потоков предложите способ обнуления открытого удаленного файла (чтобы освободить место на файловой системе).
+####
+Например имеем ситуацию:
+```bash
+vagrant@vagrant:~$ lsof -p 2336
+***
+vim     2336 vagrant    4u   REG  253,0    12288 1572881 /tmp/.log.txt.swp (deleted)
+```
+делаем вот так:
+```bash
+vagrant@vagrant:~$ echo '' >/proc/1126/fd/4
+```
+где 2336 - PID процесса vim
+4 - дескриптор файла, который предварительно был удалён. 
+
+4) Занимают ли зомби-процессы какие-то ресурсы в ОС (CPU, RAM, IO)?
+####
+`zombie` — дочерний процесс в Unix-системе, завершивший своё выполнение, но ещё присутствующий в списке процессов операционной системы, чтобы дать родительскому процессу считать код завершения.
+Процесс при завершении (как нормальном, так и в результате не обрабатываемого сигнала) освобождает все свои ресурсы и становится «зомби» — пустой записью в таблице процессов, хранящей статус завершения, предназначенный для чтения родительским процессом.
+
+Зомби-процесс существует до тех пор, пока родительский процесс не прочитает его статус с помощью системного вызова wait(), в результате чего запись в таблице процессов будет освобождена.
+
+При завершении процесса система уведомляет родительский процесс о завершении дочернего с помощью сигнала SIGCHLD, таким образом может быть удобно (но не обязательно) осуществлять вызов wait() в обработчике данного сигнала.
+
+5) В iovisor BCC есть утилита `opensnoop`:
+```bash
+root@vagrant:~# dpkg -L bpfcc-tools | grep sbin/opensnoop
+/usr/sbin/opensnoop-bpfcc
+```
+На какие файлы вы увидели вызовы группы `open` за первую секунду работы утилиты? Воспользуйтесь пакетом `bpfcc-tools` для Ubuntu 20.04. Дополнительные [сведения по установке](https://github.com/iovisor/bcc/blob/master/INSTALL.md).
+####
+Установил вот так:
+```bash
+sudo apt-get install bpfcc-tools linux-headers-$(vagrant -r)
+```
+Посмотрим файлы за первую секунду работы вот так:
+```bash
+vagrant@vagrant:/tmp$ sudo /usr/sbin/opensnoop-bpfcc -d 1
+PID    COMM               FD ERR PATH
+659    irqbalance          6   0 /proc/interrupts
+659    irqbalance          6   0 /proc/stat
+659    irqbalance          6   0 /proc/irq/20/smp_affinity
+659    irqbalance          6   0 /proc/irq/0/smp_affinity
+659    irqbalance          6   0 /proc/irq/1/smp_affinity
+659    irqbalance          6   0 /proc/irq/8/smp_affinity
+659    irqbalance          6   0 /proc/irq/12/smp_affinity
+659    irqbalance          6   0 /proc/irq/14/smp_affinity
+659    irqbalance          6   0 /proc/irq/15/smp_affinity
+831    vminfo              6   0 /var/run/utmp
+653    dbus-daemon        -1   2 /usr/local/share/dbus-1/system-services
+653    dbus-daemon        20   0 /usr/share/dbus-1/system-services
+653    dbus-daemon        -1   2 /lib/dbus-1/system-services
+653    dbus-daemon        20   0 /var/lib/snapd/dbus-1/system-services/
+1      systemd            12   0 /proc/630/cgroup
+831    vminfo              6   0 /var/run/utmp
+```
+6) Какой системный вызов использует `uname -a`? Приведите цитату из man по этому системному вызову, где описывается альтернативное местоположение в `/proc`, где можно узнать версию ядра и релиз ОС.
+####
+`uname` - системный вызов для получения информации, относящейся к ядру.
+```bash
+vagrant@vagrant:~$ uname -a; echo ' '; strace /bin/bash -c 'uname -a' 2>&1 | grep uname;
+Linux vagrant 5.4.0-91-generic #102-Ubuntu SMP Fri Nov 5 16:31:28 UTC 2021 x86_64 x86_64 x86_64 GNU/Linux
+
+execve("/bin/bash", ["/bin/bash", "-c", "uname -a"], 0x7ffe82458570 /* 23 vars */) = 0
+uname({sysname="Linux", nodename="vagrant", ...}) = 0
+stat("/usr/local/sbin/uname", 0x7ffc4a0e2640) = -1 ENOENT (No such file or directory)
+stat("/usr/local/bin/uname", 0x7ffc4a0e2640) = -1 ENOENT (No such file or directory)
+stat("/usr/sbin/uname", 0x7ffc4a0e2640) = -1 ENOENT (No such file or directory)
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+access("/usr/bin/uname", X_OK)          = 0
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+access("/usr/bin/uname", R_OK)          = 0
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+access("/usr/bin/uname", X_OK)          = 0
+stat("/usr/bin/uname", {st_mode=S_IFREG|0755, st_size=39288, ...}) = 0
+access("/usr/bin/uname", R_OK)          = 0
+execve("/usr/bin/uname", ["uname", "-a"], 0x55f90ef4a560 /* 23 vars */) = 0
+uname({sysname="Linux", nodename="vagrant", ...}) = 0
+uname({sysname="Linux", nodename="vagrant", ...}) = 0
+uname({sysname="Linux", nodename="vagrant", ...}) = 0
+```
+
+7) Чем отличается последовательность команд через `;` и через `&&` в bash? Например:
+```bash
+root@netology1:~# test -d /tmp/some_dir; echo Hi
+Hi
+root@netology1:~# test -d /tmp/some_dir && echo Hi
+root@netology1:~#
+```
+Есть ли смысл использовать в bash `&&`, если применить `set -e`?
+####
+- Использование `;` позволяет последовательно выполнять команды, вне зависимости от результата выполнения предыдущей команды.
+- Использование `&&` позволяет выполнять команды зависимо от результата выполнения предыдущих - команда, стоящая за `&&` будет выполнена только в случае успешного завершения команды, стоящей перед `&&`.
+- Использование `||` позволяет условно выполнять команды - если слева стоящая команда выполнена, то справа стоящая не выполняется, если первая дала ошибку, пробуем выполнить вторую.
+
+для уточнения ответа на вопрос про `set -e` воспользуемся: `help set`.
+- `-e`  Exit immediately if a command exits with a non-zero status.
+
+Т.е. в случае `&&`  вместе с `set -e`, вероятно, не имеет смысла, так как при ошибке, выполнение команд прекратится в любом из двух случаев.
+
+8) Из каких опций состоит режим bash `set -euxo pipefail` и почему его хорошо было бы использовать в сценариях?
+####
+1. `-e` предписывает bash немедленно завершить работу, если какая-либо команда имеет ненулевой статус выхода;
+2. `-x` включает режим оболочки, в котором все выполняемые команды выводятся на терминал.
+3. `-u` неустановленные/не заданные параметры и переменные считаются как ошибки, с выводом в stderr текста ошибки и выполнит завершение неинтерактивного вызова;
+4. `-o pipefail` предотвращает маскирование ошибок в конвейере. В случае сбоя какой-либо команды в конвейере этот код возврата будет использоваться как код возврата для всего конвейера.
+
+Используя `set -euxo pipefail`, мы повышаем деталезацию вывода ошибок, что необходимо при хорошем логировании.
+
+9)  Используя `-o stat` для `ps`, определите, какой наиболее часто встречающийся статус у процессов в системе. В `man ps` ознакомьтесь (`/PROCESS STATE CODES`) что значат дополнительные к основной заглавной буквы статуса процессов. Его можно не учитывать при расчете (считать S, Ss или Ssl равнозначными).
+####
+Наиболее часто встречаются процессы с STAT = `S`, `Ss` или `Ssl` - (прерываемый сон), ожидающие дальнейшей команды/сигналов.
+
+```bash
+Here are the different values that the s, stat and state output specifiers (header "STAT" or "S") will display
+       to describe the state of a process:
+
+               D    uninterruptible sleep (usually IO)
+               I    Idle kernel thread
+               R    running or runnable (on run queue)
+               S    interruptible sleep (waiting for an event to complete)
+               T    stopped by job control signal
+               t    stopped by debugger during the tracing
+               W    paging (not valid since the 2.6.xx kernel)
+               X    dead (should never be seen)
+               Z    defunct ("zombie") process, terminated but not reaped by its parent
+
+       For BSD formats and when the stat keyword is used, additional characters may be displayed:
+
+               <    high-priority (not nice to other users)
+               N    low-priority (nice to other users)
+               L    has pages locked into memory (for real-time and custom IO)
+               s    is a session leader
+               l    is multi-threaded (using CLONE_THREAD, like NPTL pthreads do)
+               +    is in the foreground process group
+строки (425 - 446)
+```
+
+
 ## Комментарии по ДЗ "3.2. Работа в терминале, лекция 2"
 1) Какого типа команда `cd`? Попробуйте объяснить, почему она именно такого типа; опишите ход своих мыслей, если считаете что она могла бы быть другого типа.
 ####
 Можно воспользоваться командой `type` для определения типа команды:
-```shell
+```bash
 type cd
 ```
 получим: `cd is a shell builtin`. Т.о. выяснили, что команда является встроенной.
@@ -13,7 +184,7 @@ type cd
 
 2) Какая альтернатива без `pipe` команде `grep <some_string> <some_file> | wc -l`? `man grep` поможет в ответе на этот вопрос.
 ####
-```shell
+```bash
 vagrant@vagrant:/tmp$ cat file.txt
 hello world!
 current year - 2022
@@ -28,7 +199,7 @@ vagrant@vagrant:/tmp$ grep 2022 file.txt -c
 3) Какой процесс с PID 1 является родителем для всех процессов в вашей виртуальной машине `Ubuntu 20.04`?
 ####
 systemd 
-```shell
+```bash
 vagrant@vagrant:/tmp$ pstree -p
 systemd(1)─┬─VBoxService(884)─┬─{VBoxService}(886)
            │                  ├─{VBoxService}(887)
@@ -38,22 +209,22 @@ systemd(1)─┬─VBoxService(884)─┬─{VBoxService}(886)
 4) Как будет выглядеть команда, которая перенаправит вывод `stderr ls` на другую сессию терминала?
 #### 
 Для этого откроем второй терминал и сделаем `vagrant ssh`. По итогу получаем две сессии:
-```shell
+```bash
 vagrant@vagrant:/tmp$ who
 vagrant  pts/0        2022-01-29 15:40 (10.0.2.2)
 vagrant  pts/1        2022-01-29 17:26 (10.0.2.2)
 ```
 Перенаправляем вывод stderr ls:
-```shell
+```bash
 vagrant@vagrant:/$ ls -l \temp 2>/dev/pts/1
 ```
 В терминале другой сессии видим:
-```shell
+```bash
 vagrant@vagrant:~$ ls: cannot access 'temp': No such file or directory
 ```
 
 5) Получится ли одновременно передать команде файл на `stdin` и вывести ее stdout в другой файл? Приведите работающий пример.
-```shell
+```bash
 vagrant@vagrant:/tmp$ cat file.txt
 hello world!
 current year - 2022
@@ -69,20 +240,20 @@ vagrant@vagrant:/tmp$
 6) Получится ли находясь в графическом режиме, вывести данные из `PTY` в какой-либо из эмуляторов `TTY`? Сможете ли вы наблюдать выводимые данные?
 ####
 Получится:
-```shell
+```bash
 vagrant@vagrant:/$ tty
 /dev/pts/0
 vagrant@vagrant:/$ sudo echo Hi! Echo from pts0 to tty1 >/dev/tty1
 ```
 В эмуляторе TTY увидим:
-```shell
+```bash
 vagrant@vagrant:~$ tty
 /dev/tty1
 vagrant@vagrant:~$ Hi! Echo from pts0 to tty1
 ```
 
 7) Выполните команду `bash 5>&1`. К чему она приведет? Что будет, если вы выполните `echo netology > /proc/$$/fd/5`? Почему так происходит?
-```shell
+```bash
 vagrant@vagrant:/$ bash 5>&1
 vagrant@vagrant:/$ echo netology > /proc/$$/fd/5
 netology
@@ -90,8 +261,8 @@ netology
 После выполнения `bash 5>&1` в текущей сессии был создан дескриптор с номером 5, вывод `netology` будет перенаправлен в дескриптор 5 и в `stdout`.
 
 8) Получится ли в качестве входного потока для pipe использовать только stderr команды, не потеряв при этом отображение stdout на pty? Напоминаем: по умолчанию через pipe передается только stdout команды слева от | на stdin команды справа. Это можно сделать, поменяв стандартные потоки местами через промежуточный новый дескриптор, который вы научились создавать в предыдущем вопросе.
-```shell
-vagrant@vagrant:/$ ls -l /root 5>&2 2>&1 1>&5 |grep denied -c
+```bash
+vagrant@vagrant:/$ ls -l /root 5>&2 2>&1 1>&5 | grep denied -c
 1
 ```
 где:
@@ -102,18 +273,18 @@ vagrant@vagrant:/$ ls -l /root 5>&2 2>&1 1>&5 |grep denied -c
 9) Что выведет команда `cat /proc/$$/environ`? Как еще можно получить аналогичный по содержанию вывод?
 #### 
 Таким образом выводим информацию о переменных окружения. Можно вывести ещё через `env` / `printenv`. Или, например, вывести значение определённой переменной:
-```shell
+```bash
 vagrant@vagrant:~$ printenv HOME
 /home/vagrant
 ```
 
 10) Используя man, опишите что доступно по адресам `/proc/<PID>/cmdline`, `/proc/<PID>/exe`.
 Для этого перейдём в документацию по `proc`:
-```shell
+```bash
 man proc
 ```
 и найдём:
-```shell
+```bash
 /proc/[pid]/cmdline
               This  read-only  file holds the complete command line for the process, unless the process is a zombie.
               In the latter case, there is nothing in this file: that is, a read on this file will return 0  charac‐
@@ -150,14 +321,14 @@ man proc
 - `/proc/[pid]/exe` - содержит ссылку до файла запущенного для процесса [pid].
 
 11) Узнайте, какую наиболее старшую версию набора инструкций `SSE` поддерживает ваш процессор с помощью `/proc/cpuinfo`.
-```shell
+```bash
 vagrant@vagrant:/$ cd /proc
 vagrant@vagrant:/proc$ cat cpuinfo | grep sse
 ```
 Старшая версия: `sse4_2` 
 
 12) При открытии нового окна терминала и `vagrant ssh` создается новая сессия и выделяется `pty`. Это можно подтвердить командой `tty`, которая упоминалась в лекции 3.2. Однако:
-```shell
+```bash
 vagrant@netology1:~$ ssh localhost 'tty'
 not a tty
 ```
@@ -166,7 +337,7 @@ not a tty
 `not a tty` - означает, что он не работает внутри терминала.
 По умолчанию, когда мы запускаем команду на удаленном компьютере с помощью ssh, `TTY` не выделяется для удаленного сеанса.
 Но если нужно, то можно добавить `-t`, и команда будет исполняться c принудительным созданием псевдотерминала:
-```shell
+```bash
 vagrant@vagrant:/proc$ ssh -t localhost 'tty'
 vagrant@localhost's password:
 /dev/pts/3
@@ -177,7 +348,7 @@ vagrant@vagrant:/proc$
 13) Бывает, что есть необходимость переместить запущенный процесс из одной сессии в другую. Попробуйте сделать это, воспользовавшись `reptyr`. Например, так можно перенести в `screen` процесс, который вы запустили по ошибке в обычной `SSH-сессии`.
 ####
 Мне потребовалась установка `reptyr`. Установил вот так:
-```shell
+```bash
 sudo apt update
 sudo apt install reptyr
 ```
@@ -193,7 +364,7 @@ do
 done
 ```
 Запустим его:
-```shell
+```bash
 vagrant@vagrant:~$ tty
 /dev/pts/0
 vagrant@vagrant:~$ sh /tmp/script.sh
@@ -205,7 +376,7 @@ Press [CTRL+C] to exit this loop...
 Press [CTRL+C] to exit this loop...
 ```
 Открыв другую сессию, узнаем `PID` этого процесса:
-```shell
+```bash
 vagrant@vagrant:~$ tty
 /dev/pts/1
 vagrant@vagrant:~$ ps -ef | grep -i script.sh
@@ -215,11 +386,11 @@ vagrant    10433   10288  0 20:32 pts/1    00:00:00 grep --color=auto -i script.
 Искомый `PID` = 10303
 ####
 Сделаем манипуляцию вида:
-```shell
+```bash
 vagrant@vagrant:/$ sudo bash -c "echo 0 > /proc/sys/kernel/yama/ptrace_scope"
 ```
 это позволит присоединиться к процессу и избежать ошибки:
-```shell
+```bash
 vagrant@vagrant:/$ reptyr 10303
 [-] Timed out waiting for child stop.
 Unable to attach to pid 10303: Operation not permitted
@@ -228,7 +399,7 @@ the target's, check the value of /proc/sys/kernel/yama/ptrace_scope.
 For more information, see /etc/sysctl.d/10-ptrace.conf
 ```
 Далее делаем перехват этого процесса в текущую сессию в `screen`:
-```shell
+```bash
 vagrant@vagrant:~$ sudo reptyr -T 10303
 ```
 после можно закрывать терминал, в котором был запущен скрипт. Его работа и вывод продолжится в другом терминале.
@@ -245,7 +416,7 @@ vagrant@vagrant:~$ sudo reptyr -T 10303
 3) В вашем основном окружении подготовьте удобный для дальнейшей работы терминал: `установлен Windows Terminal`;
 4) С помощью базового файла конфигурации запустите Ubuntu 20.04 в VirtualBox посредством Vagrant:
 - Заменено содержимое Vagrantfile по умолчанию следующим:
-```shell
+```bash
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-20.04"
 end
@@ -259,7 +430,7 @@ end
 ```
 
 6) Ознакомьтесь с возможностями конфигурации VirtualBox через Vagrantfile: документация. Как добавить оперативной памяти или ресурсов процессора виртуальной машине?
-```shell
+```bash
 Vagrant.configure("2") do |config|
   config.vm.box = "bento/ubuntu-20.04"
   
@@ -275,7 +446,7 @@ end
 
 8) Ознакомиться с разделами man bash, почитать о настройках самого bash:
 - какой переменной можно задать длину журнала history, и на какой строчке manual это описывается?
-```shell
+```bash
 HISTFILESIZE
               The maximum number of lines contained in the history file.  When this variable is assigned a value, the history file is
               truncated, if necessary, to contain no more than that number of lines by removing the oldest entries.  The history file
@@ -305,13 +476,13 @@ ignoreboth, ignorespace и ignoredups - значения для переменн
 
 10) С учётом ответа на предыдущий вопрос, как создать однократным вызовом touch 100000 файлов? Получится ли аналогичным образом создать 300000? Если нет, то почему?
 - создаём в текущей директории 100000 фалов
-```shell
+```bash
 touch {000001..100000}.txt
 ```
 - Создать 300000 файлов не получится, так как будет превышение stack_size заданного по умолчанию.
 
 12) В man bash поищите по /\[\[. Что делает конструкция `[[ -d /tmp ]]`?
-```shell
+```bash
 RESERVED WORDS
        Reserved words are words that have a special meaning to the shell.  The following words are recognized as reserved when unquoted and either
        the first word of a simple command (see SHELL GRAMMAR below) or the third word of a case or for command:
@@ -322,13 +493,13 @@ RESERVED WORDS
 - конструкция `[[ -d /tmp ]]` проверяет условие -d /tmp и возвращает статус (0 или 1) при наличии/отсутствии каталога /tmp.
 
 13. Основываясь на знаниях о просмотре текущих (например, PATH) и установке новых переменных; командах, которые мы рассматривали, добейтесь в выводе type -a bash в виртуальной машине наличия первым пунктом в списке:
-```shell
+```bash
 bash is /tmp/new_path_directory/bash
 bash is /usr/local/bin/bash
 bash is /bin/bash
 ```
 - для этого выполняем:
-```shell
+```bash
 vagrant@vagrant:~$ mkdir /tmp/new_path_directory
 vagrant@vagrant:~$ cp /bin/bash /tmp/new_path_directory/
 vagrant@vagrant:~$ PATH=/tmp/new_path_directory/:$PATH
@@ -341,7 +512,7 @@ vagrant@vagrant:~$ PATH=/tmp/new_path_directory/:$PATH
 
 15. Завершите работу виртуальной машины чтобы не расходовать ресурсы компьютера и/или батарею ноутбука.
 - выключим vm штатным образом, выполнив:
-```shell
+```bash
 vagrant halt
 ```
 
@@ -365,7 +536,7 @@ vagrant halt
 4) Перечислите хеши и комментарии всех коммитов которые были сделаны между тегами v0.12.23 и v0.12.24.
 - для этого можно воспользоваться `git log v0.12.23..v0.12.24 --pretty=oneline` - получим:
 ####
-```shell
+```bash
 33ff1c03bb960b332be3af2e333462dde88b279e (tag: v0.12.24) v0.12.24
 b14b74c4939dcab573326f4e3ee2a62e23e12f89 [Website] vmc provider links
 3f235065b9347a758efadc92295b540ee0a5e26e Update CHANGELOG.md
@@ -379,7 +550,7 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 ---
 5) Найдите коммит в котором была создана функция func providerSource, ее определение в коде выглядит так func providerSource(...) (вместо троеточего перечислены аргументы).
 - воспользуемся git log и выведем краткую информацию о коммите: `git log -S 'func providerSource(' --pretty=format:"%h, %s, %cd, %an"` - получим:
-```shell
+```bash
 8c928e835, main: Consult local directories as potential mirrors of providers, Mon Apr 6 09:24:23 2020 -0700, Martin Atkins.
 ```
 ---
@@ -387,7 +558,7 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 ####
 для этого сначала найдём упоминания этой функции в файлах: `git grep -p 'globalPluginDirs('` - получим:
 ####
-```shell
+```bash
  commands.go=func initCommands(
  commands.go:            GlobalPluginDirs: globalPluginDirs(),
  commands.go=func credentialsSource(config *cliconfig.Config) (auth.CredentialsSource, error) {
@@ -399,7 +570,7 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 - то есть, в plugins.go инициализирована функция globalPluginDirs.
 - найдём все коммиты, в которых были изменения функции globalPluginDirs, в файле plugins.go: `git log -L :globalPluginDirs:plugins.go --pretty=format:"%h, %s"` - получим:
 ####
-```shell
+```bash
 78b122055, Remove config.go and update things using its aliases
 52dbf9483, keep .terraform.d/plugins for discovery
 41ab0aef7, Add missing OS_ARCH dir to global plugin paths
@@ -409,7 +580,7 @@ dd01a35078f040ca984cdd349f18d0b67e486c35 Update CHANGELOG.md
 7) Кто автор функции synchronizedWriters?
 - для этого воспользуемся `git log -S 'synchronizedWriters' --reverse --pretty=format:"%h, %an"` - первый коммит - это коммит автора функции synchronizedWriters, то есть:
 ####
-```shell
+```bash
 5ac311e2a, Martin Atkins
 ```
 
