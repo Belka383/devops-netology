@@ -130,7 +130,11 @@ root@netology1:~#
 для уточнения ответа на вопрос про `set -e` воспользуемся: `help set`.
 - `-e`  Exit immediately if a command exits with a non-zero status.
 
-Т.е. в случае `&&`  вместе с `set -e`, вероятно, не имеет смысла, так как при ошибке, выполнение команд прекратится в любом из двух случаев.
+С параметром `-e` оболочка завершится только при ненулевом коде возврата простой команды.
+Если ошибочно завершится одна из команд, разделённых `&&`, то выхода из шелла не произойдёт. Так что, смысл есть.
+```bash
+The shell does not exit if the command that fails is . . . part of any command executed in a && or || list except the command following the final &&
+```
 
 8) Из каких опций состоит режим bash `set -euxo pipefail` и почему его хорошо было бы использовать в сценариях?
 ####
