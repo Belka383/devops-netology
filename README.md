@@ -1,5 +1,279 @@
 # Devops Netology
 
+## Комментарии по ДЗ "3.4. Операционные системы, лекция 2"
+1) На лекции мы познакомились с [node_exporter](https://github.com/prometheus/node_exporter/releases). В демонстрации его исполняемый файл запускался в background. Этого достаточно для демо, но не для настоящей production-системы, где процессы должны находиться под внешним управлением. Используя знания из лекции по systemd, создайте самостоятельно простой [unit-файл](https://www.freedesktop.org/software/systemd/man/systemd.service.html) для node_exporter:
+
+    * поместите его в автозагрузку,
+    * предусмотрите возможность добавления опций к запускаемому процессу через внешний файл (посмотрите, например, на `systemctl cat cron`),
+    * удостоверьтесь, что с помощью systemctl процесс корректно стартует, завершается, а после перезагрузки автоматически поднимается.
+
+####
+Устанавливаем node_exporter как:
+```bash
+vagrant@vagrant:/$ cd /tmp
+vagrant@vagrant:/$ curl -LO https://github.com/prometheus/node_exporter/releases/download/v0.18.1/node_exporter-0.18.1.linux-amd64.tar.gz
+vagrant@vagrant:/$ tar -xvf node_exporter-0.18.1.linux-amd64.tar.gz
+vagrant@vagrant:/$ sudo mv node_exporter-0.18.1.linux-amd64/node_exporter /usr/local/bin/
+vagrant@vagrant:/$ sudo useradd -rs /bin/false node_exporter
+```
+Указываем конфигурационный файл:
+```bash
+vagrant@vagrant:/$ sudo vim /etc/systemd/system/node_exporter.service
+```
+с содержимым:
+```shell
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+EnvironmentFile=/etc/sysconfig/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+```
+Создадим Environment file:
+```bash
+vagrant@vagrant:~$ sudo mkdir -p /etc/sysconfig
+vagrant@vagrant:~$ sudo vim /etc/sysconfig/node_exporter
+```
+с содержимым:
+```shell
+OPTIONS="--var 1000"
+```
+
+Перезапускаем системный демон и включаем службу node_exporter:
+```shell
+vagrant@vagrant:/usr/local/bin$ sudo systemctl daemon-reload
+vagrant@vagrant:/usr/local/bin$ sudo systemctl start node_exporter
+```
+Проверяем, что запуск прошёл успешно, и что node_exporter в активном состоянии:
+```shell
+vagrant@vagrant:/usr/local/bin$ sudo systemctl status node_exporter
+● node_exporter.service - Node Exporter
+     Loaded: loaded (/etc/systemd/system/node_exporter.service; disabled; vendor preset: enabled)
+     Active: active (running) since Sun 2022-02-13 16:46:18 UTC; 5s ago
+   Main PID: 1387 (node_exporter)
+      Tasks: 6 (limit: 2278)
+     Memory: 1.7M
+     CGroup: /system.slice/node_exporter.service
+             └─1387 /usr/local/bin/node_exporter
+
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - sockstat" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - stat" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - textfile" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - time" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - timex" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - uname" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - vmstat" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - xfs" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg=" - zfs" source="node_exporter.go:104"
+Feb 13 16:46:18 vagrant node_exporter[1387]: time="2022-02-13T16:46:18Z" level=info msg="Listening on :9100" source="node_exporter.go>vagrant@vagrant:/usr/local/bin$ sudo systemctl enable node_exporter
+```
+Устанавливаем в автозагрузку:
+```bash
+vagrant@vagrant:/usr/local/bin$ sudo systemctl enable node_exporter
+```
+Перезапускаем vm и проверяем, что node_exporter запустился:
+```bash
+vagrant@vagrant:~$ ps -e |grep node_exporter
+    662 ?        00:00:00 node_exporter
+```
+Пробуем перезапустить из терминала:
+```bash
+vagrant@vagrant:~$ systemctl stop node_exporter
+==== AUTHENTICATING FOR org.freedesktop.systemd1.manage-units ===
+Authentication is required to stop 'node_exporter.service'.
+Authenticating as: vagrant
+Password:
+==== AUTHENTICATION COMPLETE ===
+vagrant@vagrant:~$ ps -e |grep node_exporter
+vagrant@vagrant:~$ systemctl start node_exporter
+==== AUTHENTICATING FOR org.freedesktop.systemd1.manage-units ===
+Authentication is required to start 'node_exporter.service'.
+Authenticating as: vagrant
+Password:
+==== AUTHENTICATION COMPLETE ===
+vagrant@vagrant:~$ ps -e |grep node_exporter
+   1113 ?        00:00:00 node_exporter
+```
+Попробуем открыть `http://localhost:9100/metrics`
+```bash
+vagrant@vagrant:~$ curl http://localhost:9100/metrics
+# HELP go_gc_duration_seconds A summary of the GC invocation durations.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 0
+go_gc_duration_seconds{quantile="0.25"} 0
+go_gc_duration_seconds{quantile="0.5"} 0
+go_gc_duration_seconds{quantile="0.75"} 0
+go_gc_duration_seconds{quantile="1"} 0
+go_gc_duration_seconds_sum 0
+go_gc_duration_seconds_count 0
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 7
+```
+Для удобства в virtualbox добавляем проброс порта 9100 и проверяем, что http://localhost:9100/ отвечает.
+
+Проверяем, что переменная окружения из `/etc/sysconfig/node_exporter` добавилась:
+```bash
+vagrant@vagrant:/etc/sysconfig$ ps -e |grep node_exporter
+   1113 ?        00:00:00 node_exporter
+vagrant@vagrant:/etc/sysconfig$ sudo cat /proc/1113/environ
+LANG=en_US.UTF-8PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/binHOME=/home/node_exporterLOGNAME=node_exporterUSER=node_exporterINVOCATION_ID=d51b7e66765b4192a4ccdf8038f2e48cJOURNAL_STREAM=9:30389OPTIONS=--var 1000
+```
+
+2) Ознакомьтесь с опциями node_exporter и выводом `/metrics` по умолчанию. Приведите несколько опций, которые вы бы выбрали для базового мониторинга хоста по CPU, памяти, диску и сети.
+
+CPU:
+- `node_cpu_seconds_total` - Seconds the cpus spent in each mode;
+- `node_pressure_cpu_waiting_seconds_total` - Total time in seconds that processes have waited for CPU time;
+- `process_cpu_seconds_total` - Total user and system CPU time spent in seconds.
+
+Memory:
+- `node_memory_MemAvailable_bytes` - Memory information field MemAvailable_bytes;
+- `node_memory_MemFree_bytes` - Memory information field MemFree_bytes.
+
+Disk:
+- `node_disk_io_time_seconds_total` - Total seconds spent doing I/Os;
+- `node_disk_read_bytes_total` - The total number of bytes read successfully;
+- `node_disk_read_time_seconds_total` - The total number of seconds spent by all reads;
+- `node_disk_write_time_seconds_total` - This is the total number of seconds spent by all writes.
+
+Network:
+- `node_network_receive_errs_total` - Network device statistic receive_errs;
+- `node_network_receive_bytes_total` - Network device statistic receive_bytes;
+- `node_network_transmit_bytes_total` - Network device statistic transmit_bytes;
+- `node_network_transmit_errs_total` - Network device statistic transmit_errs;
+
+3)  Установите в свою виртуальную машину [Netdata](https://github.com/netdata/netdata). Воспользуйтесь [готовыми пакетами](https://packagecloud.io/netdata/netdata/install) для установки (`sudo apt install -y netdata`). После успешной установки:
+    * в конфигурационном файле `/etc/netdata/netdata.conf` в секции [web] замените значение с localhost на `bind to = 0.0.0.0`,
+    * добавьте в Vagrantfile проброс порта Netdata на свой локальный компьютер и сделайте `vagrant reload`:
+
+```bash
+config.vm.network "forwarded_port", guest: 19999, host: 19999
+```
+После успешной перезагрузки в браузере *на своем ПК* (не в виртуальной машине) вы должны суметь зайти на `localhost:19999`. Ознакомьтесь с метриками, которые по умолчанию собираются Netdata и с комментариями, которые даны к этим метрикам.
+
+Устанавливаем netdata как:
+```bash
+sudo apt install -y netdata
+```
+смотрим что прописано в конфигурационном файле:
+```bash
+vagrant@vagrant:/etc/netdata$ sudo vim netdata.conf
+```
+Видим:
+```bash
+# The current full configuration can be retrieved from the running
+# server at the URL
+#
+#   http://localhost:19999/netdata.conf
+#
+# for example:
+#
+#   wget -O /etc/netdata/netdata.conf http://localhost:19999/netdata.conf
+#
+```
+Выполняем:
+```bash
+vagrant@vagrant:/etc/netdata$ sudo wget -O /etc/netdata/netdata.conf http://localhost:19999/netdata.conf
+```
+после чего можем исправить в секции [web] значение с localhost на `bind to = 0.0.0.0`, а так же я установил для `default port` значение 9200.
+
+в файле конфигурации Vagrantfile указываем:
+```bash
+config.vm.network "forwarded_port", guest: 9100, host: 9100
+config.vm.network "forwarded_port", guest: 9200, host: 9200
+```
+Получаем:
+![img.png](src/img/netdata.png)
+
+4) Можно ли по выводу `dmesg` понять, осознает ли ОС, что загружена не на настоящем оборудовании, а на системе виртуализации?
+
+Конечно! Выполним:
+```bash
+vagrant@vagrant:~$ dmesg | grep "Hypervisor detected"
+[    0.000000] Hypervisor detected: KVM
+```
+если бы машина была физической, то вывода не было бы никакого.
+
+5) Как настроен sysctl `fs.nr_open` на системе по умолчанию? Узнайте, что означает этот параметр. Какой другой существующий лимит не позволит достичь такого числа (`ulimit --help`)?
+
+```bash
+vagrant@vagrant:~$ /sbin/sysctl -n fs.nr_open
+1048576
+```
+`nr_open` - это максимальное количество файлов, которые могут быть выделены одним процессом.
+Посмотрим, какое значение можно установить для `nr_open`:
+```bash
+vagrant@vagrant:~$ cat /proc/sys/fs/file-max
+9223372036854775807
+```
+
+`ulimit` - используется для ограничения ресурсов, которые может использовать каждый пользователь, таких как процессор, память, дескрипторы и т. д.
+-S использовать `мягкий` лимит ресурсов
+-H использовать `жесткий` лимит ресурсов
+
+```
+vagrant@vagrant:~$ ulimit -Sn
+1024
+vagrant@vagrant:~$ ulimit -Hn
+1048576
+```
+
+6) Запустите любой долгоживущий процесс (не `ls`, который отработает мгновенно, а, например, `sleep 1h`) в отдельном неймспейсе процессов; покажите, что ваш процесс работает под PID 1 через `nsenter`. Для простоты работайте в данном задании под root (`sudo -i`). Под обычным пользователем требуются дополнительные опции (`--map-root-user`) и т.д.
+
+Запускаем скрипт shell, который остался после прошлых ДЗ:
+```shell
+while true
+do
+    D=$(date  +%Y-%m-%d)
+    T=$(date +%H:%M:%S)
+    echo  "$D" "$T"
+    echo "Press [CTRL+C] to exit this loop..."
+    sleep 1
+done
+```
+```bash
+vagrant@vagrant:/tmp$ sudo -i
+root@vagrant:~# unshare -f --pid --mount-proc /bin/bash
+root@vagrant:~# sh /tmp/script.sh
+2022-02-13 21:29:36
+```
+Проверяем как запущен процесс:
+```bash
+vagrant@vagrant:/tmp$ sudo -i
+root@vagrant:~# ps -ef | grep -i script.sh
+root        8102    8095  0 21:39 pts/2    00:00:00 sh /tmp/script.sh
+root        8167    8146  0 21:39 pts/0    00:00:00 grep --color=auto -i script.sh
+root@vagrant:~# nsenter --target 8102 --pid --mount
+root@vagrant:/# ps -ef | grep -i script.sh
+root           8       1  0 21:39 pts/2    00:00:00 sh /tmp/script.sh
+root         117      93  0 21:39 pts/0    00:00:00 grep --color=auto -i script.sh
+root@vagrant:/# ps aux
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.1   7236  4052 pts/2    S    21:39   0:00 /bin/bash
+root           8  0.1  0.0   2608  1736 pts/2    S+   21:39   0:00 sh /tmp/script.sh
+root          93  0.0  0.2   7236  4236 pts/0    S    21:39   0:00 -bash
+root         204  0.0  0.0   5476   528 pts/2    S+   21:40   0:00 sleep 1
+root         205  0.0  0.1   8892  3472 pts/0    R+   21:40   0:00 ps aux
+```
+
+7) Найдите информацию о том, что такое `:(){ :|:& };:`. Запустите эту команду в своей виртуальной машине Vagrant с Ubuntu 20.04 (**это важно, поведение в других ОС не проверялось**). Некоторое время все будет "плохо", после чего (минуты) – ОС должна стабилизироваться. Вызов `dmesg` расскажет, какой механизм помог автоматической стабилизации. Как настроен этот механизм по умолчанию, и как изменить число процессов, которое можно создать в сессии?
+```
+f() { f | f & } f
+```
+- это функция, которая параллельно пускает два своих экземпляра. Каждый пускает ещё по два и т.д. 
+При отсутствии лимита на число процессов машина быстро исчерпывает физическую память и уходит в своп.
+
+Как раз используя `ulimit -u` можно ограничить подобные кейсы, установив максимальное количество процессов для пользователя.
+
+
 ## Комментарии по ДЗ "3.3. Операционные системы, лекция 1"
 1) Какой системный вызов делает команда `cd`? В прошлом ДЗ мы выяснили, что `cd` не является самостоятельной программой, это `shell builtin`, поэтому запустить `strace` непосредственно на `cd` не получится. Тем не менее, вы можете запустить `strace` на `/bin/bash -c 'cd /tmp'`. В этом случае вы увидите полный список системных вызовов, которые делает сам `bash` при старте. Вам нужно найти тот единственный, который относится именно к `cd`. Обратите внимание, что `strace` выдаёт результат своей работы в поток stderr, а не в stdout.
 ####
